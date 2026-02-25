@@ -1,0 +1,19 @@
+{
+  "name": "electron-alert",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.29.3",
+  "devDependencies": {
+    "electron": "^40.6.1"
+  },
+  "dependencies": {
+    "@wagomu/todotxt-parser": "^1.0.0"
+  }
+}

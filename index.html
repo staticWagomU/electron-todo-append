@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Todo Quick Add</title>
+  <style>
+    :root {
+      --bg:       #1c1c1e;
+      --surface:  #2c2c2e;
+      --border:   #3a3a3c;
+      --text:     #f2f2f7;
+      --muted:    #8e8e93;
+      --accent:   #0a84ff;
+      --accent-h: #409cff;
+      --danger:   #ff453a;
+      --btn-bg:   #3a3a3c;
+      --btn-h:    #48484a;
+      --r:        6px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    /* both views hidden by default; JS shows the right one */
+    #view-main, #view-settings { display: none; flex-direction: column; height: 100vh; }
+
+    /* ── Shared ── */
+    input[type="text"], select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-app-region: no-drag;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+
+    .field-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      margin-bottom: 5px;
+    }
+
+    .btn {
+      padding: 7px 16px;
+      border: none;
+      border-radius: var(--r);
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    .btn-cancel  { background: var(--btn-bg); color: var(--text); }
+    .btn-cancel:hover  { background: var(--btn-h); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+
+    .btn-sm {
+      padding: 5px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      font-weight: 500;
+      background: var(--btn-bg);
+      color: var(--text);
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-sm:hover { background: var(--btn-h); }
+    .btn-sm.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+    .btn-sm.danger:hover { background: rgba(255,69,58,0.12); }
+
+    /* ── Toggle button group (priority & templates) ── */
+    .toggle-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+    .toggle-btn {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 500;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .toggle-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+    .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* Priority buttons are equal-width */
+    #prio-group .toggle-btn { flex: 1; text-align: center; }
+
+    /* ── Main view ── */
+    .titlebar {
+      -webkit-app-region: drag;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .titlebar-title { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.3px; }
+    .close-btn {
+      -webkit-app-region: no-drag;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #ff5f57;
+      border: none; cursor: pointer;
+      color: transparent; font-size: 10px;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.1s;
+    }
+    .close-btn:hover { color: rgba(0,0,0,0.55); }
+
+    .main-content {
+      flex: 1;
+      padding: 14px 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    /* Due row */
+    .due-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+    .due-row input[type="checkbox"] {
+      width: 15px; height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .due-row .due-label { font-size: 13px; color: var(--text); cursor: pointer; }
+    .due-row .due-date  { font-size: 12px; color: var(--muted); }
+
+    /* Template button area: scrollable if many */
+    #tmpl-group-wrap {
+      max-height: 64px;
+      overflow-y: auto;
+    }
+
+    .main-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      -webkit-app-region: no-drag;
+      margin-top: auto;
+    }
+
+    .main-footer {
+      height: 30px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 0 14px;
+      flex-shrink: 0;
+    }
+    .settings-link {
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: color 0.15s;
+    }
+    .settings-link:hover { color: var(--accent); }
+
+    /* ── Settings view ── */
+    .settings-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .settings-header h1 { font-size: 15px; font-weight: 600; }
+
+    .settings-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .settings-section h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .browse-row { display: flex; gap: 8px; }
+    .browse-row input { flex: 1; }
+
+    /* Template list in settings */
+    .tmpl-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow-y: auto;
+      min-height: 56px;
+      max-height: 130px;
+    }
+    .tmpl-item {
+      padding: 7px 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .tmpl-item:last-child { border-bottom: none; }
+    .tmpl-item:hover { background: var(--btn-bg); }
+    .tmpl-item.sel {
+      background: rgba(10,132,255,0.15);
+      border-left: 2px solid var(--accent);
+      padding-left: 8px;
+    }
+    .tmpl-name { flex: 1; font-weight: 500; font-size: 13px; }
+    .tmpl-tags { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+    /* Template editor */
+    .tmpl-editor {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .editor-field { display: flex; flex-direction: column; gap: 4px; }
+    .editor-field label { font-size: 11px; color: var(--muted); font-weight: 500; }
+    .editor-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+
+    .settings-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: #30d158;
+      color: #000;
+      padding: 5px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.err  { background: var(--danger); color: #fff; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ Main View ═══════════════════ -->
+<div id="view-main">
+  <div class="titlebar">
+    <span class="titlebar-title">✏ Todo Quick Add</span>
+    <button class="close-btn" id="btn-close">×</button>
+  </div>
+
+  <div class="main-content">
+    <div>
+      <input type="text" id="task-input" placeholder="タスクを入力...">
+    </div>
+
+    <div>
+      <div class="field-label">優先度</div>
+      <div class="toggle-group" id="prio-group">
+        <button class="toggle-btn active" data-p="">なし</button>
+        <button class="toggle-btn" data-p="A">A</button>
+        <button class="toggle-btn" data-p="B">B</button>
+      </div>
+    </div>
+
+    <div class="due-row">
+      <input type="checkbox" id="due-check">
+      <label class="due-label" for="due-check">今日を期限に設定</label>
+      <span class="due-date" id="due-date-label"></span>
+    </div>
+
+    <div>
+      <div class="field-label">テンプレート</div>
+      <div id="tmpl-group-wrap">
+        <div class="toggle-group" id="tmpl-group">
+          <!-- populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <div class="main-actions">
+      <button class="btn btn-cancel" id="btn-cancel">キャンセル</button>
+      <button class="btn btn-primary" id="btn-add">追加する</button>
+    </div>
+  </div>
+
+  <div class="main-footer">
+    <span class="settings-link" id="btn-settings">⚙ 設定</span>
+  </div>
+</div>
+
+<!-- ═══════════════════ Settings View ═══════════════════ -->
+<div id="view-settings">
+  <div class="settings-header">
+    <h1>⚙ 設定</h1>
+  </div>
+
+  <div class="settings-body">
+    <div class="settings-section">
+      <h2>保存先ファイルパス</h2>
+      <div class="browse-row">
+        <input type="text" id="s-path" placeholder="~/todo.txt">
+        <button class="btn-sm" id="s-browse">参照...</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>グローバルショートカット</h2>
+      <input type="text" id="s-shortcut" placeholder="CommandOrControl+Shift+T">
+    </div>
+
+    <div class="settings-section">
+      <h2>テンプレート</h2>
+      <div class="tmpl-list" id="s-tmpl-list"></div>
+    </div>
+
+    <div class="tmpl-editor">
+      <div class="editor-field">
+        <label>名前</label>
+        <input type="text" id="e-name" placeholder="仕事/定例会議">
+      </div>
+      <div class="editor-field">
+        <label>projects（スペース区切り、+ 不要）</label>
+        <input type="text" id="e-projects" placeholder="work">
+      </div>
+      <div class="editor-field">
+        <label>contexts（スペース区切り、@ 不要）</label>
+        <input type="text" id="e-contexts" placeholder="meeting">
+      </div>
+      <div class="editor-field">
+        <label>デフォルト優先度</label>
+        <div class="toggle-group" id="e-prio-group">
+          <button class="toggle-btn active" data-ep="">なし</button>
+          <button class="toggle-btn" data-ep="A">A</button>
+          <button class="toggle-btn" data-ep="B">B</button>
+        </div>
+      </div>
+      <div class="editor-actions">
+        <button class="btn-sm" id="e-add">+ 追加</button>
+        <button class="btn-sm" id="e-update">✎ 更新</button>
+        <button class="btn-sm danger" id="e-delete">✗ 削除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-footer">
+    <button class="btn btn-primary" id="s-save">保存して閉じる</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const { ipcRenderer } = require('electron')
+
+  // ── Routing ──────────────────────────────────────────────────────────────────
+  const view = new URLSearchParams(location.search).get('view') || 'main'
+  document.getElementById('view-' + view).style.display = 'flex'
+  if (view === 'main') initMain(); else initSettings()
+
+  // ── Toast ─────────────────────────────────────────────────────────────────────
+  function showToast(msg, isErr = false) {
+    const el = document.getElementById('toast')
+    el.textContent = msg
+    el.className = 'show' + (isErr ? ' err' : '')
+    clearTimeout(el._t)
+    el._t = setTimeout(() => (el.className = ''), 2200)
+  }
+
+  // ── Main View ─────────────────────────────────────────────────────────────────
+  function initMain() {
+    const taskInput = document.getElementById('task-input')
+    const tmplGroup = document.getElementById('tmpl-group')
+    const dueCheck  = document.getElementById('due-check')
+
+    document.getElementById('due-date-label').textContent =
+      '(' + new Date().toISOString().slice(0, 10) + ')'
+
+    let priority    = ''
+    let tmplIndex   = -1
+    let cfg         = null
+
+    // ── Config / template buttons ───────────────────────────────────────────────
+    async function loadConfig() {
+      cfg = await ipcRenderer.invoke('config:get')
+      renderTemplateButtons()
+    }
+
+    function renderTemplateButtons() {
+      tmplGroup.innerHTML = ''
+      tmplIndex = -1
+      ;(cfg?.templates ?? []).forEach((t, i) => {
+        const btn = document.createElement('button')
+        btn.className = 'toggle-btn'
+        btn.textContent = t.name
+        btn.addEventListener('click', () => selectTemplate(i))
+        tmplGroup.appendChild(btn)
+      })
+    }
+
+    function selectTemplate(i) {
+      if (tmplIndex === i) {
+        // deselect
+        tmplIndex = -1
+      } else {
+        tmplIndex = i
+        // auto-set priority if template has a default
+        const p = cfg.templates[i].priority
+        if (p) { priority = p; updatePrioUI() }
+      }
+      updateTmplUI()
+    }
+
+    function updatePrioUI() {
+      document.querySelectorAll('#prio-group .toggle-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.p === priority)
+      )
+    }
+
+    function updateTmplUI() {
+      document.querySelectorAll('#tmpl-group .toggle-btn').forEach((b, i) =>
+        b.classList.toggle('active', i === tmplIndex)
+      )
+    }
+
+    // ── Priority ─────────────────────────────────────────────────────────────────
+    document.getElementById('prio-group').addEventListener('click', e => {
+      const btn = e.target.closest('.toggle-btn')
+      if (!btn) return
+      const p = btn.dataset.p
+      priority = (p === '' || priority === p) ? '' : p
+      updatePrioUI()
+    })
+
+    // ── IPC events ───────────────────────────────────────────────────────────────
+    ipcRenderer.on('window:shown', () => {
+      loadConfig()
+      resetForm()
+      // requestAnimationFrame ensures focus runs after the window is painted
+      requestAnimationFrame(() => taskInput.focus())
+    })
+    ipcRenderer.on('config:updated', () => loadConfig())
+
+    // ── Buttons ───────────────────────────────────────────────────────────────────
+    document.getElementById('btn-close').addEventListener('click',
+      () => ipcRenderer.invoke('window:hide'))
+    document.getElementById('btn-cancel').addEventListener('click',
+      () => ipcRenderer.invoke('window:hide'))
+    document.getElementById('btn-settings').addEventListener('click',
+      () => ipcRenderer.invoke('window:open-settings'))
+    document.getElementById('btn-add').addEventListener('click', addTask)
+
+    // Enter only from the input to avoid double-fire when a button is focused
+    taskInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addTask() }
+    })
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') ipcRenderer.invoke('window:hide')
+    })
+
+    // ── Add task ──────────────────────────────────────────────────────────────────
+    async function addTask() {
+      const text = taskInput.value.trim()
+      if (!text) { taskInput.focus(); return }
+
+      const res = await ipcRenderer.invoke('todo:add', {
+        text,
+        priority:      priority || null,
+        dueToday:      dueCheck.checked,
+        templateIndex: tmplIndex,
+      })
+
+      if (res.ok) {
+        showToast('追加しました ✓')
+        setTimeout(() => ipcRenderer.invoke('window:hide'), 700)
+        resetForm()
+      } else {
+        showToast('エラー: ' + res.error, true)
+      }
+    }
+
+    function resetForm() {
+      taskInput.value = ''
+      priority = ''
+      tmplIndex = -1
+      updatePrioUI()
+      updateTmplUI()
+      dueCheck.checked = false
+    }
+
+    loadConfig()
+    taskInput.focus()
+  }
+
+  // ── Settings View ─────────────────────────────────────────────────────────────
+  function initSettings() {
+    let cfg    = null
+    let selIdx = -1
+    let ePrio  = ''
+
+    ipcRenderer.invoke('config:get').then(c => {
+      cfg = c
+      document.getElementById('s-path').value     = cfg.filePath
+      document.getElementById('s-shortcut').value = cfg.shortcut
+      renderList()
+    })
+
+    function renderList() {
+      const list = document.getElementById('s-tmpl-list')
+      list.innerHTML = ''
+      cfg.templates.forEach((t, i) => {
+        const tags = [
+          ...t.projects.map(p => '+' + p),
+          ...t.contexts.map(c => '@' + c),
+        ].join(' ')
+        const el = document.createElement('div')
+        el.className = 'tmpl-item' + (i === selIdx ? ' sel' : '')
+        el.innerHTML =
+          `<span class="tmpl-name">${t.name}</span>` +
+          `<span class="tmpl-tags">${tags}</span>`
+        el.addEventListener('click', () => selectTmpl(i))
+        list.appendChild(el)
+      })
+    }
+
+    function selectTmpl(i) {
+      selIdx = i
+      const t = cfg.templates[i]
+      document.getElementById('e-name').value     = t.name
+      document.getElementById('e-projects').value = t.projects.join(' ')
+      document.getElementById('e-contexts').value = t.contexts.join(' ')
+      ePrio = t.priority || ''
+      updateEPrioUI()
+      renderList()
+    }
+
+    function updateEPrioUI() {
+      document.querySelectorAll('#e-prio-group .toggle-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.ep === ePrio)
+      )
+    }
+
+    document.getElementById('e-prio-group').addEventListener('click', e => {
+      const btn = e.target.closest('.toggle-btn')
+      if (!btn) return
+      const p = btn.dataset.ep
+      ePrio = (p === '' || ePrio === p) ? '' : p
+      updateEPrioUI()
+    })
+
+    function getEditorData() {
+      return {
+        name:     document.getElementById('e-name').value.trim(),
+        projects: document.getElementById('e-projects').value.trim().split(/\s+/).filter(Boolean),
+        contexts: document.getElementById('e-contexts').value.trim().split(/\s+/).filter(Boolean),
+        priority: ePrio || null,
+      }
+    }
+
+    function clearEditor() {
+      document.getElementById('e-name').value     = ''
+      document.getElementById('e-projects').value = ''
+      document.getElementById('e-contexts').value = ''
+      ePrio = ''
+      updateEPrioUI()
+      selIdx = -1
+      renderList()
+    }
+
+    document.getElementById('e-add').addEventListener('click', () => {
+      const d = getEditorData()
+      if (!d.name) return
+      cfg.templates.push(d)
+      selIdx = cfg.templates.length - 1
+      renderList()
+      clearEditor()
+    })
+
+    document.getElementById('e-update').addEventListener('click', () => {
+      if (selIdx < 0) return
+      const d = getEditorData()
+      if (!d.name) return
+      cfg.templates[selIdx] = d
+      renderList()
+    })
+
+    document.getElementById('e-delete').addEventListener('click', () => {
+      if (selIdx < 0) return
+      cfg.templates.splice(selIdx, 1)
+      clearEditor()
+    })
+
+    document.getElementById('s-browse').addEventListener('click', async () => {
+      const p = await ipcRenderer.invoke('dialog:open-file')
+      if (p) document.getElementById('s-path').value = p
+    })
+
+    document.getElementById('s-save').addEventListener('click', async () => {
+      cfg.filePath = document.getElementById('s-path').value.trim()
+      cfg.shortcut = document.getElementById('s-shortcut').value.trim()
+      await ipcRenderer.invoke('config:save', cfg)
+      window.close()
+    })
+  }
+</script>
+</body>
+</html>
