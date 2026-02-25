@@ -407,8 +407,6 @@
 <div id="toast"></div>
 
 <script>
-  const { ipcRenderer } = require('electron')
-
   // ── Routing ──────────────────────────────────────────────────────────────────
   const view = new URLSearchParams(location.search).get('view') || 'main'
   document.getElementById('view-' + view).style.display = 'flex'
@@ -438,7 +436,7 @@
 
     // ── Config / template buttons ───────────────────────────────────────────────
     async function loadConfig() {
-      cfg = await ipcRenderer.invoke('config:get')
+      cfg = await window.electronAPI.getConfig()
       renderTemplateButtons()
     }
 
@@ -489,21 +487,21 @@
     })
 
     // ── IPC events ───────────────────────────────────────────────────────────────
-    ipcRenderer.on('window:shown', () => {
+    window.electronAPI.onWindowShown(() => {
       loadConfig()
       resetForm()
       // requestAnimationFrame ensures focus runs after the window is painted
       requestAnimationFrame(() => taskInput.focus())
     })
-    ipcRenderer.on('config:updated', () => loadConfig())
+    window.electronAPI.onConfigUpdated(() => loadConfig())
 
     // ── Buttons ───────────────────────────────────────────────────────────────────
     document.getElementById('btn-close').addEventListener('click',
-      () => ipcRenderer.invoke('window:hide'))
+      () => window.electronAPI.hide())
     document.getElementById('btn-cancel').addEventListener('click',
-      () => ipcRenderer.invoke('window:hide'))
+      () => window.electronAPI.hide())
     document.getElementById('btn-settings').addEventListener('click',
-      () => ipcRenderer.invoke('window:open-settings'))
+      () => window.electronAPI.openSettings())
     document.getElementById('btn-add').addEventListener('click', addTask)
 
     // Enter only from the input to avoid double-fire when a button is focused
@@ -511,7 +509,7 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addTask() }
     })
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') ipcRenderer.invoke('window:hide')
+      if (e.key === 'Escape') window.electronAPI.hide()
     })
 
     // ── Add task ──────────────────────────────────────────────────────────────────
@@ -519,7 +517,7 @@
       const text = taskInput.value.trim()
       if (!text) { taskInput.focus(); return }
 
-      const res = await ipcRenderer.invoke('todo:add', {
+      const res = await window.electronAPI.addTodo({
         text,
         priority:      priority || null,
         dueToday:      dueCheck.checked,
@@ -528,7 +526,7 @@
 
       if (res.ok) {
         showToast('追加しました ✓')
-        setTimeout(() => ipcRenderer.invoke('window:hide'), 700)
+        setTimeout(() => window.electronAPI.hide(), 700)
         resetForm()
       } else {
         showToast('エラー: ' + res.error, true)
@@ -554,7 +552,7 @@
     let selIdx = -1
     let ePrio  = ''
 
-    ipcRenderer.invoke('config:get').then(c => {
+    window.electronAPI.getConfig().then(c => {
       cfg = c
       document.getElementById('s-path').value     = cfg.filePath
       document.getElementById('s-shortcut').value = cfg.shortcut
@@ -647,14 +645,14 @@
     })
 
     document.getElementById('s-browse').addEventListener('click', async () => {
-      const p = await ipcRenderer.invoke('dialog:open-file')
+      const p = await window.electronAPI.openFile()
       if (p) document.getElementById('s-path').value = p
     })
 
     document.getElementById('s-save').addEventListener('click', async () => {
       cfg.filePath = document.getElementById('s-path').value.trim()
       cfg.shortcut = document.getElementById('s-shortcut').value.trim()
-      await ipcRenderer.invoke('config:save', cfg)
+      await window.electronAPI.saveConfig(cfg)
       window.close()
     })
   }

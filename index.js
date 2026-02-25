@@ -59,8 +59,9 @@ function createMainWindow() {
     show: false,
     skipTaskbar: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   })
   mainWindow.loadFile('index.html')
@@ -85,8 +86,9 @@ function openSettingsWindow() {
     height: 600,
     resizable: false,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: path.join(__dirname, 'preload-settings.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   })
   settingsWindow.loadFile('index.html', { query: { view: 'settings' } })
