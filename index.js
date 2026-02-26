@@ -139,7 +139,7 @@ ipcMain.handle('todo:add', (_, { text, priority, dueToday, templateIndex }) => {
   try {
     const cfg   = readConfig()
     const tmpl  = (templateIndex >= 0 && cfg.templates[templateIndex]) || null
-    const today = new Date().toISOString().slice(0, 10)
+    const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Tokyo' })
 
     let description = text.trim()
     if (tmpl) {
