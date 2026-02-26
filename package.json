@@ -1,17 +1,37 @@
 {
-  "name": "electron-alert",
+  "name": "electron-todo-append",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build": "electron-builder --mac"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.29.3",
+  "build": {
+    "appId": "com.wagomu.electron-todo-append",
+    "productName": "TodoTxtAppend",
+    "files": [
+      "index.js",
+      "preload.js",
+      "preload-settings.js",
+      "overlay.html",
+      "settings.html",
+      "index.html"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    }
+  },
   "devDependencies": {
-    "electron": "^40.6.1"
+    "electron": "^40.6.1",
+    "electron-builder": "^26.8.1"
   },
   "dependencies": {
     "@wagomu/todotxt-parser": "^1.0.0"
