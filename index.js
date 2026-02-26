@@ -6,10 +6,14 @@ const {
   globalShortcut,
   ipcMain,
   dialog,
+  Tray,
+  Menu,
+  nativeImage,
 } = require('electron')
 const fs   = require('node:fs')
 const path = require('node:path')
 const os   = require('node:os')
+const zlib = require('node:zlib')
 const { appendTaskToFile } = require('@wagomu/todotxt-parser')
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -40,6 +44,78 @@ function readConfig() {
 function writeConfig(cfg) {
   fs.mkdirSync(path.dirname(configPath), { recursive: true })
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8')
+}
+
+// ── Tray icon ─────────────────────────────────────────────────────────────────
+
+/**
+ * Build a 16x16 RGBA PNG of a "T" (Todo) shape at runtime, so no asset file
+ * is required.  setTemplateImage(true) lets macOS auto-invert for dark mode.
+ */
+function buildTrayIcon() {
+  const size = 16
+  const rows = []
+  for (let y = 0; y < size; y++) {
+    const row = Buffer.alloc(1 + size * 4, 0)  // filter byte + RGBA
+    row[0] = 0                                  // filter type = None
+    for (let x = 0; x < size; x++) {
+      // "T" shape: horizontal top bar (y 3-5, x 2-13) + vertical stem (y 3-13, x 6-9)
+      const inBar  = (y >= 3 && y <= 5 && x >= 2 && x <= 13)
+      const inStem = (y >= 3 && y <= 13 && x >= 6 && x <= 9)
+      row[1 + x * 4 + 3] = (inBar || inStem) ? 255 : 0  // alpha; RGB stays 0 (black)
+    }
+    rows.push(row)
+  }
+  const compressed = zlib.deflateSync(Buffer.concat(rows))
+
+  const crc32 = buf => {
+    const t = Array.from({ length: 256 }, (_, i) => {
+      let c = i
+      for (let j = 0; j < 8; j++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1
+      return c
+    })
+    let crc = 0xFFFFFFFF
+    for (const b of buf) crc = t[(crc ^ b) & 0xFF] ^ (crc >>> 8)
+    return (crc ^ 0xFFFFFFFF) >>> 0
+  }
+  const chunk = (type, data) => {
+    const l = Buffer.alloc(4); l.writeUInt32BE(data.length)
+    const t = Buffer.from(type)
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc32(Buffer.concat([t, data])))
+    return Buffer.concat([l, t, data, c])
+  }
+
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4)
+  ihdr[8] = 8; ihdr[9] = 6   // 8-bit depth, RGBA color type
+
+  const png = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),  // PNG signature
+    chunk('IHDR', ihdr),
+    chunk('IDAT', compressed),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+  const img = nativeImage.createFromBuffer(png)
+  img.setTemplateImage(true)  // macOS: auto dark/light mode inversion
+  return img
+}
+
+// ── Tray ──────────────────────────────────────────────────────────────────────
+
+let tray = null
+
+function createTray() {
+  tray = new Tray(buildTrayIcon())
+  tray.setToolTip('TodoTxtAppend')
+  // On macOS, click event is suppressed when a context menu is set,
+  // so the toggle action lives as the first menu item (standard macOS convention).
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'ウィンドウを表示/非表示', click: toggleMainWindow },
+    { type: 'separator' },
+    { label: '設定',                   click: openSettingsWindow },
+    { type: 'separator' },
+    { label: '終了',                   click: () => app.quit() },
+  ]))
 }
 
 // ── Windows ───────────────────────────────────────────────────────────────────
@@ -194,6 +270,7 @@ ipcMain.handle('dialog:open-file', async (event) => {
 app.whenReady().then(() => {
   configPath = path.join(app.getPath('userData'), 'config.json')
   createMainWindow()
+  createTray()
   const cfg = readConfig()
   try {
     globalShortcut.register(cfg.shortcut, toggleMainWindow)
