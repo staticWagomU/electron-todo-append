@@ -21,8 +21,9 @@ const { appendTaskToFile } = require('@wagomu/todotxt-parser')
 let configPath
 
 const DEFAULT_CONFIG = {
-  filePath: path.join(os.homedir(), 'todo.txt'),
-  shortcut: 'CommandOrControl+Shift+T',
+  filePath:     path.join(os.homedir(), 'todo.txt'),
+  shortcut:     'CommandOrControl+Shift+T',
+  shortcutList: 'CommandOrControl+Shift+L',
   templates: [
     { name: '仕事/全般',     projects: ['work'],     contexts: [],           priority: null },
     { name: '仕事/定例会議', projects: ['work'],     contexts: ['meeting'],  priority: 'A'  },
@@ -124,6 +125,7 @@ let mainWindow     = null
 let settingsWindow = null
 let isSettingsOpen = false
 let blurHideTimer  = null   // debounce handle to cancel blur-hide on shortcut
+let currentPanel   = 'form' // 'form' | 'list'
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -178,18 +180,47 @@ function openSettingsWindow() {
   })
 }
 
-function toggleMainWindow() {
+function showMainWindowWithPanel(panel) {
   if (!mainWindow) return
   // Cancel any blur-triggered hide that may have fired just before this shortcut
   clearTimeout(blurHideTimer)
 
+  const event = panel === 'list' ? 'window:shown-list' : 'window:shown'
+
   if (mainWindow.isVisible()) {
-    mainWindow.hide()
+    if (currentPanel === panel) {
+      // Same panel already showing → hide
+      mainWindow.hide()
+    } else {
+      // Different panel → switch without hiding
+      currentPanel = panel
+      mainWindow.focus()
+      mainWindow.webContents.send(event)
+    }
   } else {
+    currentPanel = panel
     mainWindow.show()
     mainWindow.focus()
     // send after OS actually grants focus to avoid focus() racing with show()
-    mainWindow.once('focus', () => mainWindow.webContents.send('window:shown'))
+    mainWindow.once('focus', () => mainWindow.webContents.send(event))
+  }
+}
+
+function toggleMainWindow()   { showMainWindowWithPanel('form') }
+function toggleListWindow()   { showMainWindowWithPanel('list') }
+
+function registerShortcuts(cfg) {
+  try {
+    globalShortcut.register(cfg.shortcut, toggleMainWindow)
+  } catch (e) {
+    console.error('Shortcut registration failed:', e.message)
+  }
+  if (cfg.shortcutList) {
+    try {
+      globalShortcut.register(cfg.shortcutList, toggleListWindow)
+    } catch (e) {
+      console.error('List shortcut registration failed:', e.message)
+    }
   }
 }
 
@@ -200,13 +231,9 @@ ipcMain.handle('config:get', () => readConfig())
 ipcMain.handle('config:save', (_, cfg) => {
   const prev = readConfig()
   writeConfig(cfg)
-  if (prev.shortcut !== cfg.shortcut) {
+  if (prev.shortcut !== cfg.shortcut || prev.shortcutList !== cfg.shortcutList) {
     globalShortcut.unregisterAll()
-    try {
-      globalShortcut.register(cfg.shortcut, toggleMainWindow)
-    } catch (e) {
-      console.error('Shortcut registration failed:', e.message)
-    }
+    registerShortcuts(cfg)
   }
   return { ok: true }
 })
@@ -249,6 +276,76 @@ ipcMain.handle('todo:add', (_, { text, priority, dueToday, templateIndex }) => {
   }
 })
 
+ipcMain.handle('todo:list-urgent', () => {
+  try {
+    const cfg      = readConfig()
+    const filePath = cfg.filePath.replace(/^~(?=$|\/)/, os.homedir())
+    if (!fs.existsSync(filePath)) return { ok: true, todos: [] }
+
+    const content   = fs.readFileSync(filePath, 'utf8')
+    const today     = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Tokyo' })
+    const threshold = new Date()
+    threshold.setDate(threshold.getDate() + 7)
+    const thresholdStr = threshold.toLocaleDateString('sv', { timeZone: 'Asia/Tokyo' })
+
+    const todos = content.split('\n')
+      .map((l, i) => ({ raw: l, lineIndex: i, trimmed: l.trim() }))
+      .filter(({ trimmed }) => trimmed && !trimmed.startsWith('x '))
+      .map(({ trimmed: line, lineIndex }) => {
+        const priorityMatch = line.match(/^\(([A-Z])\)\s+/)
+        const dueMatch      = line.match(/due:(\d{4}-\d{2}-\d{2})/)
+        const priority      = priorityMatch ? priorityMatch[1] : null
+        const due           = dueMatch ? dueMatch[1] : null
+        const desc          = line
+          .replace(/^\([A-Z]\)\s+/, '')
+          .replace(/^\d{4}-\d{2}-\d{2}\s+/, '')
+          .trim()
+        return { priority, due, desc, isOverdue: due ? due < today : false, lineIndex }
+      })
+      .filter(t => t.priority === 'A' || (t.due && t.due <= thresholdStr))
+      .sort((a, b) => {
+        if (a.isOverdue && !b.isOverdue) return -1
+        if (!a.isOverdue && b.isOverdue)  return  1
+        if (a.priority === 'A' && b.priority !== 'A') return -1
+        if (a.priority !== 'A' && b.priority === 'A') return  1
+        if (a.due && b.due) return a.due.localeCompare(b.due)
+        if (a.due)  return -1
+        if (b.due)  return  1
+        return 0
+      })
+
+    return { ok: true, todos }
+  } catch (err) {
+    return { ok: false, error: err.message, todos: [] }
+  }
+})
+
+ipcMain.handle('todo:complete', (_, { lineIndex }) => {
+  try {
+    const cfg      = readConfig()
+    const filePath = cfg.filePath.replace(/^~(?=$|\/)/, os.homedir())
+    if (!fs.existsSync(filePath)) return { ok: false, error: 'ファイルが見つかりません' }
+
+    const lines = fs.readFileSync(filePath, 'utf8').split('\n')
+    if (lineIndex < 0 || lineIndex >= lines.length) {
+      return { ok: false, error: '行が見つかりません' }
+    }
+
+    const line = lines[lineIndex].trim()
+    if (!line || line.startsWith('x ')) return { ok: false, error: 'すでに完了済みです' }
+
+    const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Tokyo' })
+    // todo.txt spec: remove priority when marking complete
+    const withoutPriority = line.replace(/^\([A-Z]\)\s+/, '')
+    lines[lineIndex] = `x ${today} ${withoutPriority}`
+
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf8')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('window:hide', () => mainWindow?.hide())
 
 ipcMain.handle('window:open-settings', () => openSettingsWindow())
@@ -272,11 +369,7 @@ app.whenReady().then(() => {
   createMainWindow()
   createTray()
   const cfg = readConfig()
-  try {
-    globalShortcut.register(cfg.shortcut, toggleMainWindow)
-  } catch (e) {
-    console.error('Initial shortcut registration failed:', e.message)
-  }
+  registerShortcuts(cfg)
   if (process.platform === 'darwin') app.dock.hide()
 })
 

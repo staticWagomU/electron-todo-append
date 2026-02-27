@@ -276,6 +276,89 @@
       flex-shrink: 0;
     }
 
+    /* ── Urgent list panel ── */
+    #panel-list {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .list-panel-header {
+      padding: 8px 14px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .list-panel-title { font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: 0.3px; }
+    #urgent-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 2px 8px 8px;
+    }
+    .urgent-empty {
+      padding: 24px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .urgent-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 6px;
+      border-radius: var(--r);
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+      min-width: 0;
+    }
+    .urgent-item:last-child { border-bottom: none; }
+    .urgent-item.overdue { background: rgba(255,69,58,0.07); }
+    .prio-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--accent);
+      color: #fff;
+      flex-shrink: 0;
+      font-family: ui-monospace, monospace;
+    }
+    .prio-badge.none { background: var(--btn-bg); color: var(--muted); }
+    .item-desc {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .due-badge {
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .due-badge.overdue { color: var(--danger); font-weight: 600; }
+    .due-badge.due-today { color: #ff9f0a; font-weight: 600; }
+    .done-check {
+      width: 14px; height: 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+    }
+
+    /* ── Footer nav ── */
+    .main-footer { justify-content: space-between; }
+    .list-toggle-link {
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: color 0.15s;
+    }
+    .list-toggle-link:hover { color: var(--accent); }
+    .list-toggle-link.active { color: var(--accent); font-weight: 600; }
+
     /* Toast */
     #toast {
       position: fixed;
@@ -340,7 +423,16 @@
     </div>
   </div>
 
+  <div id="panel-list">
+    <div class="list-panel-header">
+      <span class="list-panel-title">優先A / 期限7日以内</span>
+      <button class="btn-sm" id="btn-refresh-list">↻</button>
+    </div>
+    <div id="urgent-list"></div>
+  </div>
+
   <div class="main-footer">
+    <span class="list-toggle-link" id="btn-toggle-list">☰ リスト <kbd style="font-size:10px;opacity:.6">⌃L</kbd></span>
     <span class="settings-link" id="btn-settings">⚙ 設定</span>
   </div>
 </div>
@@ -362,7 +454,10 @@
 
     <div class="settings-section">
       <h2>グローバルショートカット</h2>
+      <div class="field-label">タスク登録</div>
       <input type="text" id="s-shortcut" placeholder="CommandOrControl+Shift+T">
+      <div class="field-label" style="margin-top: 8px">タスク一覧</div>
+      <input type="text" id="s-shortcut-list" placeholder="CommandOrControl+Shift+L">
     </div>
 
     <div class="settings-section">
@@ -486,12 +581,98 @@
       updatePrioUI()
     })
 
+    // ── Urgent list panel ────────────────────────────────────────────────────────
+    const mainContent = document.querySelector('.main-content')
+    const panelList   = document.getElementById('panel-list')
+    const toggleBtn   = document.getElementById('btn-toggle-list')
+    let listVisible   = false
+
+    function formatDue(due, today) {
+      if (!due) return ''
+      const diffDays = Math.round(
+        (new Date(due) - new Date(today)) / (1000 * 60 * 60 * 24)
+      )
+      if (diffDays < 0)  return `${Math.abs(diffDays)}日超過`
+      if (diffDays === 0) return '今日'
+      if (diffDays === 1) return '明日'
+      return `${diffDays}日後`
+    }
+
+    async function loadUrgentList() {
+      const listEl = document.getElementById('urgent-list')
+      listEl.innerHTML = '<div class="urgent-empty">読み込み中...</div>'
+      const res   = await window.electronAPI.listUrgentTodos()
+      const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Tokyo' })
+      listEl.innerHTML = ''
+      if (!res.ok || res.todos.length === 0) {
+        listEl.innerHTML = '<div class="urgent-empty">対象タスクなし</div>'
+        return
+      }
+      res.todos.forEach(t => {
+        const item = document.createElement('div')
+        item.className = 'urgent-item' + (t.isOverdue ? ' overdue' : '')
+
+        const cb = document.createElement('input')
+        cb.type = 'checkbox'
+        cb.className = 'done-check'
+        cb.addEventListener('change', async () => {
+          if (!cb.checked) return
+          const r = await window.electronAPI.completeTodo({ lineIndex: t.lineIndex })
+          if (r.ok) {
+            showToast('完了しました ✓')
+            loadUrgentList()
+          } else {
+            showToast('エラー: ' + r.error, true)
+            cb.checked = false
+          }
+        })
+
+        const prio = document.createElement('span')
+        prio.className = 'prio-badge' + (t.priority ? '' : ' none')
+        prio.textContent = t.priority || '─'
+
+        const desc = document.createElement('span')
+        desc.className = 'item-desc'
+        desc.textContent = t.desc
+
+        item.appendChild(cb)
+        item.appendChild(prio)
+        item.appendChild(desc)
+
+        if (t.due) {
+          const due = document.createElement('span')
+          const label = formatDue(t.due, today)
+          due.className = 'due-badge' +
+            (t.isOverdue ? ' overdue' : label === '今日' ? ' due-today' : '')
+          due.textContent = label
+          item.appendChild(due)
+        }
+
+        listEl.appendChild(item)
+      })
+    }
+
+    function showListPanel(show) {
+      listVisible = show
+      mainContent.style.display = show ? 'none' : 'flex'
+      panelList.style.display   = show ? 'flex' : 'none'
+      toggleBtn.classList.toggle('active', show)
+      if (show) loadUrgentList()
+    }
+
+    toggleBtn.addEventListener('click', () => showListPanel(!listVisible))
+    document.getElementById('btn-refresh-list').addEventListener('click', loadUrgentList)
+
     // ── IPC events ───────────────────────────────────────────────────────────────
     window.electronAPI.onWindowShown(() => {
       loadConfig()
       resetForm()
+      showListPanel(false)
       // requestAnimationFrame ensures focus runs after the window is painted
       requestAnimationFrame(() => taskInput.focus())
+    })
+    window.electronAPI.onWindowShownList(() => {
+      showListPanel(true)
     })
     window.electronAPI.onConfigUpdated(() => loadConfig())
 
@@ -510,6 +691,10 @@
     })
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') window.electronAPI.hide()
+      if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+        e.preventDefault()
+        showListPanel(!listVisible)
+      }
     })
 
     // ── Add task ──────────────────────────────────────────────────────────────────
@@ -554,8 +739,9 @@
 
     window.electronAPI.getConfig().then(c => {
       cfg = c
-      document.getElementById('s-path').value     = cfg.filePath
-      document.getElementById('s-shortcut').value = cfg.shortcut
+      document.getElementById('s-path').value          = cfg.filePath
+      document.getElementById('s-shortcut').value      = cfg.shortcut
+      document.getElementById('s-shortcut-list').value = cfg.shortcutList || ''
       renderList()
     })
 
@@ -650,8 +836,9 @@
     })
 
     document.getElementById('s-save').addEventListener('click', async () => {
-      cfg.filePath = document.getElementById('s-path').value.trim()
-      cfg.shortcut = document.getElementById('s-shortcut').value.trim()
+      cfg.filePath     = document.getElementById('s-path').value.trim()
+      cfg.shortcut     = document.getElementById('s-shortcut').value.trim()
+      cfg.shortcutList = document.getElementById('s-shortcut-list').value.trim()
       await window.electronAPI.saveConfig(cfg)
       window.close()
     })
